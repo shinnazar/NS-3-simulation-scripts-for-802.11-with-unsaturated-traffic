@@ -1,7 +1,8 @@
-# A-Simple-Performance-Model-of-IEEE-802.11-with-Arbitrary-Buffer-Size-and-Traffic-Load
-This repository includes the simulator script and patch files  used to generate data for ICOIN 2023 conference paper: A Simple Performance Model of IEEE 802.11 with Finite Buffer and Load.
+# NS-3 simulation scripts for 802.11 with unsaturated traffic
+This repository includes the simulator script and patch files used to generate data in following conference paper accepted to *The 38th International Conference on Information Networking (ICOIN) 2024*:
+- S. Seytnazarov, D. G. Jeong and W. S. Jeon, "A Simple Performance Model of IEEE 802.11 with Finite Buffer and Load."
 
-## Included files
+## Files
 ### wifi-11b.h and wifi-11b.cc files
 Implement simulation file for 802.11b adhoc/infrastructure network. It accepts command line arguments such as number of nodes, traffic load, seeds, etc.
 ### script_11b.py file 
