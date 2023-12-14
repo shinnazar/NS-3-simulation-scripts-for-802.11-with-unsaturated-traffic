@@ -1,0 +1,125 @@
+diff -ruN "ns-allinone-3 (1).40/ns-3.40/src/applications/model/udp-client.cc" ns-allinone-3.40/ns-3.40/src/applications/model/udp-client.cc
+--- "ns-allinone-3 (1).40/ns-3.40/src/applications/model/udp-client.cc"	2023-09-27 23:30:37.614839000 +0300
++++ ns-allinone-3.40/ns-3.40/src/applications/model/udp-client.cc	2023-12-03 14:38:31.344041761 +0300
+@@ -18,7 +18,7 @@
+  *                      <amine.ismail@udcast.com>
+  */
+ #include "udp-client.h"
+-
++#include <ns3/double.h>
+ #include "seq-ts-header.h"
+ 
+ #include "ns3/inet-socket-address.h"
+@@ -31,6 +31,7 @@
+ #include "ns3/socket-factory.h"
+ #include "ns3/socket.h"
+ #include "ns3/uinteger.h"
++#include "ns3/random-variable-stream.h"
+ 
+ #include <cstdio>
+ #include <cstdlib>
+@@ -95,6 +96,7 @@
+     m_totalTx = 0;
+     m_socket = nullptr;
+     m_sendEvent = EventId();
++    m_rv = nullptr;
+ }
+ 
+ UdpClient::~UdpClient()
+@@ -128,7 +130,11 @@
+ UdpClient::StartApplication()
+ {
+     NS_LOG_FUNCTION(this);
+-
++    if (!m_rv){
++        m_rv = CreateObject<ExponentialRandomVariable> ();
++        m_rv->SetAttribute ("Mean", DoubleValue(m_interval.GetSeconds()));
++        m_rv->SetAttribute ("Bound", DoubleValue(20*m_interval.GetSeconds()));
++    }
+     if (!m_socket)
+     {
+         TypeId tid = TypeId::LookupByName("ns3::UdpSocketFactory");
+@@ -196,7 +202,9 @@
+ 
+     m_socket->SetRecvCallback(MakeNullCallback<void, Ptr<Socket>>());
+     m_socket->SetAllowBroadcast(true);
+-    m_sendEvent = Simulator::Schedule(Seconds(0.0), &UdpClient::Send, this);
++    // m_sendEvent = Simulator::Schedule(Seconds(0.0), &UdpClient::Send, this);
++    m_sendEvent = Simulator::Schedule(Seconds(m_rv->GetValue()), &UdpClient::Send, this);
++
+ }
+ 
+ void
+@@ -226,14 +234,13 @@
+     m_txTraceWithAddresses(p, from, to);
+ 
+     p->AddHeader(seqTs);
+-
+     if ((m_socket->Send(p)) >= 0)
+     {
+         ++m_sent;
+         m_totalTx += p->GetSize();
+ #ifdef NS3_LOG_ENABLE
+-        NS_LOG_INFO("TraceDelay TX " << m_size << " bytes to " << m_peerAddressString << " Uid: "
+-                                     << p->GetUid() << " Time: " << (Simulator::Now()).As(Time::S));
++        NS_LOG_INFO("TraceDelay TX: node " << m_socket->GetNode() << " " << m_size << " bytes to " << m_peerAddressString << " Uid: "
++                                     << p->GetUid() << " Time: " << (Simulator::Now()).As(Time::S) << " inter-time " << m_interval.GetSeconds());
+ #endif // NS3_LOG_ENABLE
+     }
+ #ifdef NS3_LOG_ENABLE
+@@ -245,7 +252,8 @@
+ 
+     if (m_sent < m_count || m_count == 0)
+     {
+-        m_sendEvent = Simulator::Schedule(m_interval, &UdpClient::Send, this);
++        // m_sendEvent = Simulator::Schedule(m_interval, &UdpClient::Send, this);
++        m_sendEvent = Simulator::Schedule(Seconds(m_rv->GetValue()), &UdpClient::Send, this);
+     }
+ }
+ 
+diff -ruN "ns-allinone-3 (1).40/ns-3.40/src/applications/model/udp-client.h" ns-allinone-3.40/ns-3.40/src/applications/model/udp-client.h
+--- "ns-allinone-3 (1).40/ns-3.40/src/applications/model/udp-client.h"	2023-09-27 23:30:37.614839000 +0300
++++ ns-allinone-3.40/ns-3.40/src/applications/model/udp-client.h	2023-11-15 15:21:51.948955119 +0300
+@@ -27,6 +27,7 @@
+ #include "ns3/ipv4-address.h"
+ #include "ns3/ptr.h"
+ #include <ns3/traced-callback.h>
++#include "ns3/random-variable-stream.h"
+ 
+ namespace ns3
+ {
+@@ -99,6 +100,7 @@
+     Address m_peerAddress; //!< Remote peer address
+     uint16_t m_peerPort;   //!< Remote peer port
+     EventId m_sendEvent;   //!< Event to send the next packet
++    Ptr<ExponentialRandomVariable> m_rv;
+ 
+ #ifdef NS3_LOG_ENABLE
+     std::string m_peerAddressString; //!< Remote peer address string
+diff -ruN "ns-allinone-3 (1).40/ns-3.40/src/wifi/model/wifi-remote-station-manager.cc" ns-allinone-3.40/ns-3.40/src/wifi/model/wifi-remote-station-manager.cc
+--- "ns-allinone-3 (1).40/ns-3.40/src/wifi/model/wifi-remote-station-manager.cc"	2023-09-27 23:30:37.918840000 +0300
++++ ns-allinone-3.40/ns-3.40/src/wifi/model/wifi-remote-station-manager.cc	2023-11-13 16:08:18.673824609 +0300
+@@ -38,6 +38,7 @@
+ #include "ns3/simulator.h"
+ #include "ns3/uinteger.h"
+ #include "ns3/vht-configuration.h"
++#include "ns3/string.h"
+ 
+ namespace ns3
+ {
+@@ -377,9 +378,14 @@
+     for (const auto& mode : m_wifiPhy->GetModeList())
+     {
+         state->m_operationalRateSet.push_back(mode);
++        NS_LOG_ERROR("mode " << mode << " mandatory " << mode.IsMandatory() << " unique name " << mode.GetUniqueName() << " uid " << mode.GetUid());
+         if (mode.IsMandatory())
+         {
+-            AddBasicMode(mode);
++            // nazar: if dsss modes are used, use only DsssRate1Mbps as basic mode
++            if (mode.GetUniqueName().find("Dsss") == std::string::npos ||
++                (mode.GetUniqueName().find("Dsss") != std::string::npos &&
++                mode.GetUniqueName().compare("DsssRate1Mbps") == 0))
++                AddBasicMode(mode);
+         }
+     }
+ }
